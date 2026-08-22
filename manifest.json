@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.joshuaswarren.somafm",
+  "name": "Soma.fm",
+  "version": "0.1.0",
+  "author": "Joshua Warren",
+  "description": "Listener-supported commercial-free internet radio from Soma.fm in a small Omarchy shell window. Station browser with search, play/pause, volume.",
+  "kinds": [
+    "panel",
+    "bar-widget"
+  ],
+  "keepLoaded": true,
+  "entryPoints": {
+    "panel": "SomaPanel.qml",
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Soma.fm",
+    "description": "Opens the Soma.fm radio miniwindow",
+    "category": "Media",
+    "defaultSection": "right",
+    "allowMultiple": false
+  }
+}
