@@ -4,6 +4,7 @@ import Quickshell.Wayland
 import QtQuick
 import QtMultimedia
 import qs.Commons
+import "Model.js" as Model
 
 // Soma.fm panel entry point.
 // Hosted by omarchy-shell; summoned with:
@@ -152,25 +153,8 @@ Item {
       onStreamFinished: {
         root.loadingStations = false
         try {
-          var doc = JSON.parse(String(text || ""))
-          var out = []
-          for (var i = 0; i < doc.channels.length; i++) {
-            var c = doc.channels[i]
-            if (!c.playlists || c.playlists.length === 0) continue
-            var pl = c.playlists[0]
-            for (var j = 0; j < c.playlists.length; j++)
-              if (c.playlists[j].format === "mp3") { pl = c.playlists[j]; break }
-            out.push({
-              id: String(c.id),
-              title: String(c.title),
-              genre: String(c.genre || "").replace(/\|/g, " · "),
-              listeners: String(c.listeners || ""),
-              plsUrl: String(pl.url)
-            })
-          }
-          out.sort(function(a, b) { return a.title.localeCompare(b.title) })
-          root.stations = out
-          if (out.length === 0) {
+          root.stations = Model.parseChannels(String(text || ""))
+          if (root.stations.length === 0) {
             root.playState = "error"
             root.statusText = "Soma.fm returned no stations"
           } else {
@@ -197,24 +181,11 @@ Item {
   }
 
   function visibleStations() {
-    if (root.filterText === "") return root.stations
-    var f = root.filterText.toLowerCase()
-    var out = []
-    for (var i = 0; i < root.stations.length; i++) {
-      var s = root.stations[i]
-      if (s.title.toLowerCase().indexOf(f) >= 0 || s.genre.toLowerCase().indexOf(f) >= 0) out.push(s)
-    }
-    return out
+    return Model.filterStations(root.stations, root.filterText)
   }
 
-  // .pls files point at rotating icecast mirrors; resolve one direct stream
-  // URL per play instead of hardcoding hostnames. Both the playlist URL and
-  // the stream URL inside it are remote-controlled, so both are gated to
-  // https://somafm.com hosts before anything is fetched or played.
-  readonly property var somaHost: /^https:\/\/([a-z0-9\-]+\.)?somafm\.com\//
-
   function playStation(s) {
-    if (!root.somaHost.test(s.plsUrl)) {
+    if (!Model.isSomaUrl(s.plsUrl)) {
       root.playState = "error"
       root.statusText = "Rejected non-Soma.fm playlist URL"
       return
@@ -233,11 +204,10 @@ Item {
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
-        // End-anchored capture: a bare URL with no whitespace, gated to a
-        // somafm.com host after the TLS upgrade. Anything else is dropped.
-        var m = String(text || "").match(/^File\d+=(\S+)\s*$/m)
-        var url = m ? m[1].replace(/^http:\/\//, "https://") : ""
-        if (url !== "" && root.somaHost.test(url)) {
+        // Per-line capture with TLS upgrade; the somafm.com gate in Model
+        // rejects anything foreign before it reaches the player.
+        var url = Model.extractStreamUrl(String(text || ""))
+        if (url !== "" && Model.isSomaUrl(url)) {
           player.stop()
           player.source = url
           player.play()
