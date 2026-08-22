@@ -96,3 +96,31 @@ test("filterStations matches title or genre, empty filter passes through", () =>
   assert.equal(M.filterStations(stations, "AMERICANA").length, 1)
   assert.equal(M.filterStations(stations, "zzz").length, 0)
 })
+
+test("parseChannels bounds item count and field lengths", () => {
+  const many = { channels: Array.from({ length: 300 }, (_, i) => ({
+    id: "s" + i, title: "S" + i, genre: "g",
+    playlists: [{ url: "https://api.somafm.com/s" + i + ".pls", format: "mp3" }]
+  }))}
+  assert.equal(M.parseChannels(JSON.stringify(many)).length, 256)
+
+  const long = JSON.stringify({ channels: [{ id: "x", title: "T".repeat(500), genre: "G".repeat(500),
+    playlists: [{ url: "https://api.somafm.com/x.pls", format: "mp3" }] }] })
+  const st = M.parseChannels(long)[0]
+  assert.equal(st.title.length, 96)
+  assert.equal(st.genre.length, 96)
+})
+
+test("parseChannels drops non-https or oversized playlist URLs", () => {
+  const doc = JSON.stringify({ channels: [
+    { id: "a", title: "A", playlists: [{ url: "http://api.somafm.com/a.pls", format: "mp3" }] },
+    { id: "b", title: "B", playlists: [{ url: "https://" + "x".repeat(600) + ".pls", format: "mp3" }] },
+    { id: "c", title: "C", playlists: [{ url: "https://api.somafm.com/c.pls", format: "mp3" }] }
+  ]})
+  const out = M.parseChannels(doc)
+  assert.equal(out.map(s => s.id).join(""), "c")
+})
+
+test("extractStreamUrl refuses oversized values", () => {
+  assert.equal(M.extractStreamUrl("File1=https://" + "a".repeat(600)), "")
+})

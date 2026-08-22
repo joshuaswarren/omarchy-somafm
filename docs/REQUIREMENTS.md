@@ -27,6 +27,8 @@ Listening to internet radio while working means either a browser tab (heavy, get
 ## 4. Security notes
 
 - All fetches run `curl --fail --proto =https` — error pages can't be parsed as data, and redirects cannot downgrade to plaintext.
+- Every transfer is bounded by `curl --max-filesize` (2 MiB catalog, 128 KiB playlist, 16 KiB redirect probe) and parsing re-bounds item count (256) and field lengths — a hostile endpoint cannot inflate the keep-loaded shell through either buffering or structure.
+- The stream's redirect chain is resolved by the plugin before playback: the final `url_effective` must still pass the somafm.com gate, or playback is refused. The allowlist is never checked only on the initial URL.
 - Both the playlist URL from channels.json and the `File1=` value inside a `.pls` are remote-controlled; both are gated through `isSomaUrl()` (https + somafm.com host) before reaching curl or the player. The gate lives in Model.js and is unit-tested.
 - Remote strings render with `textFormat: Text.PlainText` — a hostile title cannot inject rich text or image beacons.
 

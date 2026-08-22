@@ -25,23 +25,38 @@ function pickPlaylist(playlists) {
   return best
 }
 
+// Hard bounds: a hostile or corrupt catalog cannot inflate the keep-loaded
+// shell. The transfer itself is capped by curl --max-filesize; these cap
+// what parsing will keep.
+var MAX_CHANNELS = 256
+var MAX_FIELD = 96
+var MAX_URL = 512
+
+function cap(str, n) {
+  var s = String(str || "")
+  return s.length > n ? s.slice(0, n) : s
+}
+
 // Parse the channels.json document into the panel's station shape, sorted
 // by title. Throws on invalid JSON so the caller can show its error state.
 function parseChannels(jsonText) {
   var doc = JSON.parse(jsonText)
   var out = []
   var channels = doc.channels || []
+  if (channels.length > MAX_CHANNELS) channels = channels.slice(0, MAX_CHANNELS)
   for (var i = 0; i < channels.length; i++) {
     var c = channels[i]
     if (!c.playlists || c.playlists.length === 0) continue
     var pl = pickPlaylist(c.playlists)
     if (!pl) continue
+    var plsUrl = String(pl.url)
+    if (plsUrl.indexOf("https://") !== 0 || plsUrl.length > MAX_URL) continue
     out.push({
-      id: String(c.id),
-      title: String(c.title),
-      genre: String(c.genre || "").replace(/\|/g, " · "),
-      listeners: String(c.listeners || ""),
-      plsUrl: String(pl.url)
+      id: cap(c.id, MAX_FIELD),
+      title: cap(c.title, MAX_FIELD),
+      genre: cap(String(c.genre || "").replace(/\|/g, " · "), MAX_FIELD),
+      listeners: cap(c.listeners, 8),
+      plsUrl: plsUrl
     })
   }
   out.sort(function(a, b) { return a.title.localeCompare(b.title) })
@@ -54,7 +69,7 @@ function parseChannels(jsonText) {
 // not this regex, is what neutralizes file:// or foreign hosts.
 function extractStreamUrl(plsText) {
   var m = String(plsText || "").match(/^File\d+=(\S+)\r?$/m)
-  if (!m) return ""
+  if (!m || m[1].length > MAX_URL) return ""
   return m[1].replace(/^http:\/\//, "https://")
 }
 

@@ -146,7 +146,10 @@ Item {
     running: false
     // --fail rejects error pages; --proto pinning means a redirect can never
     // downgrade the station list to plaintext.
+    // --max-filesize bounds what StdioCollector can ever buffer: --max-time
+    // alone bounds duration, not memory, in the keep-loaded shell.
     command: ["curl", "-s", "--fail", "--proto", "=https", "--max-time", "10",
+      "--max-filesize", "2097152",
       "https://somafm.com/channels.json"]
     stdout: StdioCollector {
       waitForEnd: true
@@ -190,7 +193,8 @@ Item {
       root.statusText = "Rejected non-Soma.fm playlist URL"
       return
     }
-    plsFetch.command = ["curl", "-s", "--fail", "--proto", "=https", "--max-time", "10", s.plsUrl]
+    plsFetch.command = ["curl", "-s", "--fail", "--proto", "=https", "--max-time", "10",
+      "--max-filesize", "131072", s.plsUrl]
     plsFetch.running = true
     root.currentTitle = s.title
     root.currentGenre = s.genre
@@ -207,13 +211,36 @@ Item {
         // Per-line capture with TLS upgrade; the somafm.com gate in Model
         // rejects anything foreign before it reaches the player.
         var url = Model.extractStreamUrl(String(text || ""))
-        if (url !== "" && Model.isSomaUrl(url)) {
-          player.stop()
-          player.source = url
-          player.play()
+        if (url !== "" && Model.isSomaUrl(url) && url.indexOf("'") < 0) {
+          // The player follows redirects internally, so the allowlist on the
+          // initial URL is not enough: resolve the redirect chain here first
+          // and only hand MediaPlayer a final origin that still passes.
+          verifyFetch.command = ["sh", "-c",
+            "curl -s --proto '=https' -L --max-redirs 3 --max-time 2 --max-filesize 16384"
+            + " -o /dev/null -w '%{url_effective}' '" + url + "' 2>/dev/null || true"]
+          verifyFetch.running = true
         } else {
           root.playState = "error"
           root.statusText = "Could not resolve a Soma.fm stream"
+        }
+      }
+    }
+  }
+
+  Process {
+    id: verifyFetch
+    running: false
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        var finalUrl = String(text || "").trim().split("\n").pop()
+        if (Model.isSomaUrl(finalUrl)) {
+          player.stop()
+          player.source = finalUrl
+          player.play()
+        } else {
+          root.playState = "error"
+          root.statusText = "Stream redirected off somafm.com — refusing"
         }
       }
     }
