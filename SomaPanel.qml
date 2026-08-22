@@ -189,8 +189,8 @@ Item {
     visible: root.opened && !root.sessionLocked
     anchors { top: false; left: false; right: true; bottom: true }
     margins { right: 14; bottom: 14 }
-    width: 340
-    height: 460
+    implicitWidth: 340
+    implicitHeight: 460
     color: root.background
     WlrLayershell.namespace: "somafm"
     WlrLayershell.layer: WlrLayer.Top
