@@ -1,6 +1,10 @@
 # Soma.fm for Omarchy
 
-Listener-supported, commercial-free internet radio from [Soma.fm](https://somafm.com) in a small Omarchy shell window. Browse all ~30 stations, filter by name or genre, click to play. Audio keeps streaming when the window is hidden.
+Listener-supported, commercial-free internet radio from [Soma.fm](https://somafm.com) in a small Omarchy shell window. All 46 stations, filter by name or genre, fully keyboard-drivable. Audio keeps streaming when the window is hidden.
+
+![Soma.fm panel](preview.png)
+
+![demo](assets/demo.gif)
 
 ## Install
 
@@ -18,6 +22,21 @@ rm -rf ~/.local/state/somafm
 
 - `curl` (included with Omarchy) — fetches the station list from somafm.com
 - Audio playback uses QtMultimedia inside the shell; no extra packages needed
+
+## Keyboard
+
+The panel takes focus when it opens, so it is drivable without touching the mouse:
+
+| Key | Action |
+| --- | --- |
+| `Up` / `Down` | Move the selection |
+| `PgUp` / `PgDn` | Move by eight |
+| `Home` / `End` | First / last station |
+| `Enter` | Play the selected station |
+| `Space` | Pause / resume |
+| `Esc` | Clear the filter, or hide the panel |
+
+Typing filters the list while arrows and `Enter` stay on the results, so `deep` + `Enter` plays Deep Space One.
 
 ## Usage
 

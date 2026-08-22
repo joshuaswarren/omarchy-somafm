@@ -674,6 +674,7 @@ Item {
 
         ListView {
           id: list
+
           anchors.fill: parent
           clip: true
           visible: !root.loadingStations
@@ -703,6 +704,7 @@ Item {
             readonly property bool selected: ListView.isCurrentItem
             readonly property bool current: modelData.title === root.currentTitle
 
+            width: ListView.view.width
             height: 42
             Rectangle {
               anchors.fill: parent
