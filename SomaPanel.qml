@@ -8,6 +8,7 @@ import qs.Commons
 // Soma.fm panel entry point.
 // Hosted by omarchy-shell; summoned with:
 //   omarchy-shell shell toggle io.github.joshuaswarren.somafm
+// Optional payload: {"station":"groovesalad"} plays that station id directly.
 Item {
   id: root
 
@@ -21,13 +22,24 @@ Item {
   readonly property color urgent: Color.urgent
   readonly property color muted: foreground
 
+  function tint(a) { return Qt.rgba(root.accent.r, root.accent.g, root.accent.b, a) }
+
   // ---- state ----
   property bool opened: false
   property bool loadingStations: false
-  property string playState: "idle" // idle | playing | error
+  property string playState: "idle" // idle | connecting | playing | error
   property string statusText: ""
   property var stations: []
   property string filterText: ""
+  property real audioVolume: 0.5
+  property bool audioMuted: false
+  property string currentTitle: ""
+  property string currentGenre: ""
+  property string pendingStationId: ""
+
+  readonly property bool isPlaying: root.playState === "playing"
+    && player.playbackState === MediaPlayer.PlayingState
+
   // First-party lock service: the panel must never map over the lock screen.
   // Audio deliberately keeps playing while locked (it is a radio).
   property var lockService: null
@@ -51,42 +63,60 @@ Item {
     id: player
     audioOutput: AudioOutput {
       id: audio
-      volume: 0.9
+      // Persisted, and deliberately modest on first run: a radio that opens
+      // at 90% into someone's earbuds is a bug, not a default.
+      volume: root.audioVolume
+      muted: root.audioMuted
     }
     onMediaStatusChanged: function(status) {
-      if (status === MediaPlayer.InvalidMedia) {
+      if (status === MediaPlayer.BufferedMedia || status === MediaPlayer.BufferingMedia) {
+        if (root.playState === "connecting") root.playState = "playing"
+      } else if (status === MediaPlayer.InvalidMedia) {
         root.playState = "error"
-        root.statusText = "Stream error — try another station"
-        root.currentTitle = ""
+        root.statusText = "Stream unavailable — try another station"
       }
     }
     onErrorOccurred: function(error) {
       root.playState = "error"
       root.statusText = "Playback error: " + (player.errorString || error)
-      root.currentTitle = ""
     }
   }
 
-  function open() {
+  // ---- lifecycle ----
+  function open(payloadJson) {
     root.opened = true
     if (root.stations.length === 0 && !root.loadingStations) loadStations()
+    var payload = ({})
+    try { payload = JSON.parse(payloadJson || "{}") } catch (e) { payload = ({}) }
+    if (payload.station) {
+      root.pendingStationId = String(payload.station)
+      playPendingIfPossible()
+    }
   }
 
-  function close() {
-    root.opened = false
-  }
+  function close() { root.opened = false }
 
-  // Audio keeps playing when hidden (same contract as YT Mini).
+  // Audio keeps playing when the window is hidden (it is a radio); the stop
+  // button is the way to actually end playback.
   function stop() {
     player.stop()
     player.source = ""
     root.playState = "idle"
     root.statusText = ""
+    root.currentTitle = ""
+    root.currentGenre = ""
+  }
+
+  function togglePause() {
+    if (!player.source || String(player.source) === "") return
+    if (player.playbackState === MediaPlayer.PlayingState) player.pause()
+    else player.play()
   }
 
   // ---- station list ----
   function loadStations() {
     root.loadingStations = true
+    root.statusText = ""
     fetchProcess.running = true
   }
 
@@ -113,18 +143,37 @@ Item {
             out.push({
               id: String(c.id),
               title: String(c.title),
-              genre: String(c.genre || ""),
+              genre: String(c.genre || "").replace(/\|/g, " · "),
+              listeners: String(c.listeners || ""),
               plsUrl: String(pl.url)
             })
           }
           out.sort(function(a, b) { return a.title.localeCompare(b.title) })
           root.stations = out
-          if (root.stations.length === 0) root.statusText = "Soma.fm returned no stations"
+          if (out.length === 0) {
+            root.playState = "error"
+            root.statusText = "Soma.fm returned no stations"
+          } else {
+            root.playPendingIfPossible()
+          }
         } catch (e) {
-          root.statusText = "Could not load station list"
+          root.playState = "error"
+          root.statusText = "Could not reach somafm.com"
         }
       }
     }
+  }
+
+  function playPendingIfPossible() {
+    if (root.pendingStationId === "" || root.stations.length === 0) return
+    for (var i = 0; i < root.stations.length; i++) {
+      if (root.stations[i].id === root.pendingStationId) {
+        root.pendingStationId = ""
+        playStation(root.stations[i])
+        return
+      }
+    }
+    root.pendingStationId = ""
   }
 
   function visibleStations() {
@@ -153,7 +202,9 @@ Item {
     plsFetch.command = ["curl", "-s", "--fail", "--proto", "=https", "--max-time", "10", s.plsUrl]
     plsFetch.running = true
     root.currentTitle = s.title
-    root.statusText = "Connecting…"
+    root.currentGenre = s.genre
+    root.playState = "connecting"
+    root.statusText = ""
   }
 
   Process {
@@ -162,16 +213,13 @@ Item {
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
-        // End-anchored capture: the value must be a bare https/http URL with
-        // no whitespace, and it must resolve to a somafm.com host after the
-        // TLS upgrade. Anything else (file://, ftp://, foreign host) is dropped.
-        var m = String(text || "").match(/^File\d+=(\S+)$/m)
+        // End-anchored capture: a bare URL with no whitespace, gated to a
+        // somafm.com host after the TLS upgrade. Anything else is dropped.
+        var m = String(text || "").match(/^File\d+=(\S+)\s*$/m)
         var url = m ? m[1].replace(/^http:\/\//, "https://") : ""
         if (url !== "" && root.somaHost.test(url)) {
           player.stop()
           player.source = url
-          root.playState = "playing"
-          root.statusText = ""
           player.play()
         } else {
           root.playState = "error"
@@ -181,88 +229,184 @@ Item {
     }
   }
 
-  property string currentTitle: ""
+  // ---- window position (drag header; persisted) ----
+  readonly property string stateDir: (Quickshell.env("XDG_STATE_HOME")
+    || (Quickshell.env("HOME") + "/.local/state")) + "/somafm"
+  property int marginRight: 14
+  property int marginBottom: 14
+
+  function clampMargins() {
+    var w = window && window.screen ? window.screen.width : 0
+    var h = window && window.screen ? window.screen.height : 0
+    if (w > 0) root.marginRight = Math.max(0, Math.min(root.marginRight, w - window.width))
+    if (h > 0) root.marginBottom = Math.max(0, Math.min(root.marginBottom, h - window.height))
+  }
+
+  // One state file holds window position plus volume/mute. Volume is stored
+  // as an integer percent so the writer stays a plain printf of numbers.
+  function saveSettings() {
+    stateSave.right = "" + Math.round(root.marginRight)
+    stateSave.bottom = "" + Math.round(root.marginBottom)
+    stateSave.volume = "" + Math.round(root.audioVolume * 100)
+    stateSave.muted = root.audioMuted ? "1" : "0"
+    stateSave.running = true
+  }
+
+  function savePosition() { saveSettings() }
+
+  // Dragging a slider fires continuously; coalesce the writes.
+  Timer {
+    id: saveDebounce
+    interval: 400
+    repeat: false
+    onTriggered: root.saveSettings()
+  }
+
+  function saveSettingsSoon() { saveDebounce.restart() }
+
+  Process {
+    id: stateSave
+    property string right: "14"
+    property string bottom: "14"
+    property string volume: "50"
+    property string muted: "0"
+    running: false
+    command: ["sh", "-c",
+      "mkdir -p '" + root.stateDir
+      + "' && printf '{\"right\":%s,\"bottom\":%s,\"volume\":%s,\"muted\":%s}' "
+      + stateSave.right + " " + stateSave.bottom + " "
+      + stateSave.volume + " " + stateSave.muted
+      + " > '" + root.stateDir + "/window.json'"]
+  }
+
+  FileView {
+    id: positionFile
+    path: root.stateDir + "/window.json"
+    watchChanges: false
+    printErrors: false
+    onLoaded: {
+      try {
+        var doc = JSON.parse(text())
+        if (doc.right !== undefined) root.marginRight = Math.max(0, doc.right | 0)
+        if (doc.bottom !== undefined) root.marginBottom = Math.max(0, doc.bottom | 0)
+        if (doc.volume !== undefined)
+          root.audioVolume = Math.max(0, Math.min(1, (doc.volume | 0) / 100))
+        if (doc.muted !== undefined) root.audioMuted = (doc.muted | 0) === 1
+      } catch (e) { /* first run: keep the modest defaults */ }
+    }
+  }
+
+  Component.onCompleted: positionFile.reload()
 
   // ---- window ----
   PanelWindow {
     id: window
     visible: root.opened && !root.sessionLocked
     anchors { top: false; left: false; right: true; bottom: true }
-    margins { right: 14; bottom: 14 }
-    implicitWidth: 340
-    implicitHeight: 460
+    margins { right: root.marginRight; bottom: root.marginBottom }
+    implicitWidth: 344
+    implicitHeight: 486
     color: root.background
     WlrLayershell.namespace: "somafm"
     WlrLayershell.layer: WlrLayer.Top
     WlrLayershell.keyboardFocus: WlrKeyboardFocus.OnDemand
     exclusionMode: ExclusionMode.Ignore
 
-    Keys.onEscapePressed: root.close()
-
     Column {
       anchors.fill: parent
       anchors.margins: 1
       spacing: 0
 
-      // header
+      // ---- header ----
       Rectangle {
         width: parent.width
-        height: 34
+        height: 40
         color: root.background
 
         MouseArea {
-          id: headerDrag
-          property int sx: 0
-          property int sy: 0
-          property int sr: 14
-          property int sb: 14
           anchors.fill: parent
           cursorShape: Qt.SizeAllCursor
-          onPressed: function(mouse) { sx = mouse.x; sy = mouse.y; sr = window.margins.right; sb = window.margins.bottom }
+          property int sx: 0
+          property int sy: 0
+          property int sr: 0
+          property int sb: 0
+          onPressed: function(mouse) { sx = mouse.x; sy = mouse.y; sr = root.marginRight; sb = root.marginBottom }
           onPositionChanged: function(mouse) {
             if (!pressed) return
-            window.margins.right = Math.max(0, Math.min(sr - (mouse.x - sx), window.screen.width - window.width))
-            window.margins.bottom = Math.max(0, Math.min(sb - (mouse.y - sy), window.screen.height - window.height))
+            root.marginRight = sr - (mouse.x - sx)
+            root.marginBottom = sb - (mouse.y - sy)
+            root.clampMargins()
           }
+          onReleased: root.savePosition()
         }
 
-        Text {
+        Row {
           anchors.left: parent.left
-          anchors.leftMargin: 10
+          anchors.leftMargin: 12
           anchors.verticalCenter: parent.verticalCenter
-          width: parent.width - 120
-          elide: Text.ElideRight
-          textFormat: Text.PlainText
-          color: root.playState === "error" ? root.urgent : root.foreground
-          text: {
-            if (root.playState === "error") return root.statusText
-            if (root.playState === "playing") return root.currentTitle
-            return root.statusText !== "" ? root.statusText : "Soma.fm"
+          spacing: 8
+
+          Text {
+            anchors.verticalCenter: parent.verticalCenter
+            color: root.accent
+            text: "󰐋"
+            font.pixelSize: 15
+            font.family: Style.fontFamily
           }
-          font.pixelSize: 13
-          font.family: Style.fontFamily
+
+          Text {
+            anchors.verticalCenter: parent.verticalCenter
+            color: root.foreground
+            text: "Soma.fm"
+            font.pixelSize: 13
+            font.family: Style.fontFamily
+          }
+
+          Text {
+            anchors.verticalCenter: parent.verticalCenter
+            textFormat: Text.PlainText
+            color: root.muted
+            opacity: 0.45
+            font.pixelSize: 11
+            font.family: Style.fontFamily
+            text: root.stations.length > 0 ? root.stations.length + " stations" : ""
+          }
         }
 
         Row {
           anchors.right: parent.right
           anchors.rightMargin: 12
           anchors.verticalCenter: parent.verticalCenter
-          spacing: 18
+          spacing: 16
+
+          // stop — only meaningful while something is loaded
+          Text {
+            color: root.urgent
+            opacity: root.playState === "playing" || root.playState === "connecting" ? 1 : 0.25
+            text: "󰓛"
+            font.pixelSize: 15
+            font.family: Style.fontFamily
+            Behavior on opacity { NumberAnimation { duration: 120 } }
+            MouseArea {
+              anchors.fill: parent
+              anchors.margins: -4
+              cursorShape: Qt.PointingHandCursor
+              onClicked: root.stop()
+            }
+          }
 
           Text {
             color: root.foreground
-            opacity: root.playState === "playing" ? 1 : 0.4
-            text: root.playState === "playing" ? "󰐎" : "󰐊"
+            opacity: player.source && String(player.source) !== "" ? 1 : 0.25
+            text: root.isPlaying ? "󰏤" : "󰐊"
             font.pixelSize: 15
             font.family: Style.fontFamily
+            Behavior on opacity { NumberAnimation { duration: 120 } }
             MouseArea {
               anchors.fill: parent
+              anchors.margins: -4
               cursorShape: Qt.PointingHandCursor
-              onClicked: {
-                if (!player.source) return
-                if (player.playbackState === MediaPlayer.PlayingState) player.pause()
-                else player.play()
-              }
+              onClicked: root.togglePause()
             }
           }
 
@@ -273,6 +417,7 @@ Item {
             font.family: Style.fontFamily
             MouseArea {
               anchors.fill: parent
+              anchors.margins: -4
               cursorShape: Qt.PointingHandCursor
               onClicked: root.close()
             }
@@ -282,128 +427,355 @@ Item {
 
       Rectangle { width: parent.width; height: 1; color: root.accent; opacity: 0.35 }
 
-      // filter box
+      // ---- now playing / status strip ----
       Rectangle {
-        width: parent.width - 20
-        x: 10
-        height: 30
-        radius: Style.cornerRadius
-        color: root.background
-        border.color: filterInput.activeFocus ? root.accent : root.muted
-        border.width: 1
-        opacity: 0.9
+        width: parent.width
+        height: root.playState === "idle" ? 0 : 52
+        visible: height > 0
+        color: root.playState === "error" ? Qt.rgba(root.urgent.r, root.urgent.g, root.urgent.b, 0.12) : root.tint(0.10)
 
-        TextInput {
-          id: filterInput
-          anchors.fill: parent
-          anchors.margins: 7
-          color: root.foreground
-          selectionColor: root.accent
-          font.pixelSize: 12
-          font.family: Style.fontFamily
-          clip: true
-          verticalAlignment: TextInput.AlignVCenter
-          onTextChanged: root.filterText = text
+        Behavior on height { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
+
+        // three-bar equalizer: alive while playing, still when paused
+        Row {
+          id: eq
+          anchors.left: parent.left
+          anchors.leftMargin: 14
+          anchors.verticalCenter: parent.verticalCenter
+          spacing: 3
+          visible: root.playState !== "error"
+
+          Repeater {
+            model: [0, 130, 260]
+            delegate: Rectangle {
+              required property var modelData
+              width: 3
+              radius: 1.5
+              color: root.accent
+              height: 7
+              anchors.verticalCenter: parent.verticalCenter
+
+              SequentialAnimation on height {
+                running: root.isPlaying
+                loops: Animation.Infinite
+                PauseAnimation { duration: modelData }
+                NumberAnimation { to: 17; duration: 380; easing.type: Easing.InOutSine }
+                NumberAnimation { to: 6; duration: 380; easing.type: Easing.InOutSine }
+              }
+            }
+          }
+        }
+
+        Column {
+          anchors.left: eq.right
+          anchors.leftMargin: 12
+          anchors.right: parent.right
+          anchors.rightMargin: 14
+          anchors.verticalCenter: parent.verticalCenter
+          spacing: 2
 
           Text {
-            visible: filterInput.text === "" && !filterInput.activeFocus
-            anchors.fill: parent
-            anchors.margins: 7
-            verticalAlignment: Text.AlignVCenter
-            color: root.muted
-            opacity: 0.6
-            font.pixelSize: 12
+            width: parent.width
+            elide: Text.ElideRight
+            textFormat: Text.PlainText
+            color: root.playState === "error" ? root.urgent : root.foreground
+            font.pixelSize: 13
             font.family: Style.fontFamily
-            text: "Filter stations…"
+            text: {
+              if (root.playState === "error") return root.statusText
+              if (root.playState === "connecting") return "Connecting to " + root.currentTitle + "…"
+              return root.currentTitle
+            }
+          }
+
+          Text {
+            width: parent.width
+            elide: Text.ElideRight
+            visible: text !== ""
+            textFormat: Text.PlainText
+            color: root.muted
+            opacity: 0.55
+            font.pixelSize: 11
+            font.family: Style.fontFamily
+            text: {
+              if (root.playState === "error") return "Pick another station below"
+              if (root.playState === "playing" && !root.isPlaying) return "Paused · " + root.currentGenre
+              return root.currentGenre
+            }
           }
         }
       }
 
-      // station list
-      ListView {
-        width: parent.width
-        height: parent.height - 34 - 1 - 30 - 40
-        clip: true
-        model: root.visibleStations()
-        delegate: Rectangle {
-          width: ListView.view.width
-          height: 30
-          color: rowMouse.containsPress
-            ? Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.32)
-            : (modelData.title === root.currentTitle
-              ? Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.18)
-              : (rowMouse.containsMouse ? Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.08) : "transparent"))
-
-          Behavior on color { ColorAnimation { duration: 100 } }
-
-          Row {
-            anchors.verticalCenter: parent.verticalCenter
-            anchors.left: parent.left
-            anchors.leftMargin: 12
-            anchors.right: parent.right
-            anchors.rightMargin: 12
-            spacing: 8
-            Text {
-              width: parent.width - parent.spacing - genreLabel.width
-              elide: Text.ElideRight
-              textFormat: Text.PlainText
-              color: modelData.title === root.currentTitle ? root.accent : root.foreground
-              font.pixelSize: 13
-              font.family: Style.fontFamily
-              text: modelData.title
-            }
-            Text {
-              id: genreLabel
-              textFormat: Text.PlainText
-              color: root.muted
-              opacity: 0.55
-              font.pixelSize: 11
-              font.family: Style.fontFamily
-              text: modelData.genre
-            }
-          }
-          MouseArea {
-            id: rowMouse
-            anchors.fill: parent
-            hoverEnabled: true
-            cursorShape: Qt.PointingHandCursor
-            onClicked: root.playStation(modelData)
-          }
-        }
-      }
-
-      // volume bar
+      // ---- filter ----
       Item {
         width: parent.width
         height: 40
 
         Rectangle {
-          id: volBar
+          anchors.centerIn: parent
+          width: parent.width - 24
+          height: 30
+          radius: Style.cornerRadius
+          color: root.background
+          border.color: filterInput.activeFocus ? root.accent : root.muted
+          border.width: 1
+          opacity: filterInput.activeFocus ? 1 : 0.55
+
+          Behavior on opacity { NumberAnimation { duration: 120 } }
+
+          Text {
+            id: searchGlyph
+            anchors.left: parent.left
+            anchors.leftMargin: 9
+            anchors.verticalCenter: parent.verticalCenter
+            color: root.muted
+            opacity: 0.6
+            text: "󰍉"
+            font.pixelSize: 12
+            font.family: Style.fontFamily
+          }
+
+          TextInput {
+            id: filterInput
+            anchors.left: searchGlyph.right
+            anchors.leftMargin: 8
+            anchors.right: parent.right
+            anchors.rightMargin: 8
+            anchors.verticalCenter: parent.verticalCenter
+            height: parent.height - 8
+            color: root.foreground
+            selectionColor: root.accent
+            font.pixelSize: 12
+            font.family: Style.fontFamily
+            clip: true
+            verticalAlignment: TextInput.AlignVCenter
+            onTextChanged: root.filterText = text
+            Keys.onEscapePressed: { if (text !== "") text = ""; else root.close() }
+
+            Text {
+              visible: filterInput.text === "" && !filterInput.activeFocus
+              anchors.fill: parent
+              verticalAlignment: Text.AlignVCenter
+              color: root.muted
+              opacity: 0.5
+              font.pixelSize: 12
+              font.family: Style.fontFamily
+              text: "Filter by name or genre"
+            }
+          }
+        }
+      }
+
+      // ---- station list / states ----
+      Item {
+        width: parent.width
+        height: parent.height - 40 - 1 - (root.playState === "idle" ? 0 : 52) - 40 - 48
+
+        // loading
+        Text {
+          anchors.centerIn: parent
+          visible: root.loadingStations
+          color: root.muted
+          font.pixelSize: 12
+          font.family: Style.fontFamily
+          text: "Loading stations…"
+          SequentialAnimation on opacity {
+            running: root.loadingStations
+            loops: Animation.Infinite
+            NumberAnimation { to: 0.35; duration: 700; easing.type: Easing.InOutSine }
+            NumberAnimation { to: 0.9; duration: 700; easing.type: Easing.InOutSine }
+          }
+        }
+
+        // empty filter result
+        Column {
+          anchors.centerIn: parent
+          spacing: 6
+          visible: !root.loadingStations && root.stations.length > 0 && list.count === 0
+          Text {
+            anchors.horizontalCenter: parent.horizontalCenter
+            textFormat: Text.PlainText
+            color: root.muted
+            opacity: 0.7
+            font.pixelSize: 12
+            font.family: Style.fontFamily
+            text: "No station matches “" + root.filterText + "”"
+          }
+          Text {
+            anchors.horizontalCenter: parent.horizontalCenter
+            color: root.accent
+            opacity: 0.8
+            font.pixelSize: 11
+            font.family: Style.fontFamily
+            text: "Clear filter"
+            MouseArea {
+              anchors.fill: parent
+              anchors.margins: -6
+              cursorShape: Qt.PointingHandCursor
+              onClicked: filterInput.text = ""
+            }
+          }
+        }
+
+        // failed station list — offer a retry
+        Column {
+          anchors.centerIn: parent
+          spacing: 6
+          visible: !root.loadingStations && root.stations.length === 0 && root.playState === "error"
+          Text {
+            anchors.horizontalCenter: parent.horizontalCenter
+            color: root.accent
+            opacity: 0.85
+            font.pixelSize: 12
+            font.family: Style.fontFamily
+            text: "Retry"
+            MouseArea {
+              anchors.fill: parent
+              anchors.margins: -8
+              cursorShape: Qt.PointingHandCursor
+              onClicked: root.loadStations()
+            }
+          }
+        }
+
+        ListView {
+          id: list
+          anchors.fill: parent
+          clip: true
+          visible: !root.loadingStations
+          model: root.visibleStations()
+          currentIndex: -1
+          boundsBehavior: Flickable.StopAtBounds
+
+          delegate: Item {
+            id: stationRow
+            required property var modelData
+            width: ListView.view.width
+            height: 42
+
+            readonly property bool current: modelData.title === root.currentTitle
+
+            Rectangle {
+              anchors.fill: parent
+              anchors.leftMargin: 8
+              anchors.rightMargin: 8
+              anchors.topMargin: 1
+              anchors.bottomMargin: 1
+              radius: Style.cornerRadius
+              color: rowMouse.containsPress ? root.tint(0.30)
+                : (stationRow.current ? root.tint(0.16)
+                  : (rowMouse.containsMouse ? root.tint(0.07) : "transparent"))
+
+              Behavior on color { ColorAnimation { duration: 110 } }
+
+              // playing marker
+              Rectangle {
+                anchors.left: parent.left
+                anchors.leftMargin: 6
+                anchors.verticalCenter: parent.verticalCenter
+                width: 2
+                height: stationRow.current ? 20 : 0
+                radius: 1
+                color: root.accent
+                Behavior on height { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
+              }
+
+              Column {
+                anchors.left: parent.left
+                anchors.leftMargin: 16
+                anchors.right: parent.right
+                anchors.rightMargin: 12
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: 2
+
+                Text {
+                  width: parent.width
+                  elide: Text.ElideRight
+                  textFormat: Text.PlainText
+                  color: stationRow.current ? root.accent : root.foreground
+                  font.pixelSize: 13
+                  font.family: Style.fontFamily
+                  text: modelData.title
+                }
+
+                Text {
+                  width: parent.width
+                  elide: Text.ElideRight
+                  visible: modelData.genre !== ""
+                  textFormat: Text.PlainText
+                  color: root.muted
+                  opacity: 0.5
+                  font.pixelSize: 10
+                  font.family: Style.fontFamily
+                  text: modelData.genre
+                }
+              }
+            }
+
+            MouseArea {
+              id: rowMouse
+              anchors.fill: parent
+              hoverEnabled: true
+              cursorShape: Qt.PointingHandCursor
+              onClicked: root.playStation(modelData)
+            }
+          }
+        }
+      }
+
+      // ---- volume ----
+      Item {
+        width: parent.width
+        height: 48
+
+        Text {
+          id: volGlyph
           anchors.left: parent.left
-          anchors.right: volPct.left
-          anchors.top: parent.top
-          anchors.topMargin: 16
           anchors.leftMargin: 14
-          anchors.rightMargin: 8
-          height: 6
-          radius: 3
+          anchors.verticalCenter: parent.verticalCenter
+          color: root.audioMuted ? root.urgent : root.muted
+          opacity: 0.8
+          text: root.audioMuted ? "󰖁" : (root.audioVolume > 0.5 ? "󰕾" : "󰖀")
+          font.pixelSize: 14
+          font.family: Style.fontFamily
+          MouseArea {
+            anchors.fill: parent
+            anchors.margins: -6
+            cursorShape: Qt.PointingHandCursor
+            onClicked: { root.audioMuted = !root.audioMuted; root.saveSettingsSoon() }
+          }
+        }
+
+        Rectangle {
+          id: volBar
+          anchors.left: volGlyph.right
+          anchors.leftMargin: 12
+          anchors.right: volPct.left
+          anchors.rightMargin: 10
+          anchors.verticalCenter: parent.verticalCenter
+          height: 4
+          radius: 2
           color: root.muted
           opacity: 0.25
 
           Rectangle {
-            width: parent.width * audio.volume
+            width: parent.width * root.audioVolume
             height: parent.height
-            radius: 3
-            color: root.accent
+            radius: 2
+            color: root.audioMuted ? root.muted : root.accent
           }
 
           MouseArea {
             anchors.fill: parent
-            anchors.margins: -4
+            anchors.margins: -8
             cursorShape: Qt.PointingHandCursor
-            function setVol(x) { audio.volume = Math.max(0, Math.min(1, x / width)) }
+            function setVol(x) {
+              root.audioMuted = false
+              root.audioVolume = Math.max(0, Math.min(1, x / width))
+            }
             onPressed: function(mouse) { setVol(mouse.x) }
             onPositionChanged: function(mouse) { if (pressed) setVol(mouse.x) }
+            onReleased: root.saveSettingsSoon()
           }
         }
 
@@ -411,11 +783,12 @@ Item {
           id: volPct
           anchors.right: parent.right
           anchors.rightMargin: 14
-          anchors.verticalCenter: volBar.verticalCenter
+          anchors.verticalCenter: parent.verticalCenter
           color: root.muted
-          font.pixelSize: 11
+          opacity: 0.6
+          font.pixelSize: 10
           font.family: Style.fontFamily
-          text: Math.round(audio.volume * 100) + "%"
+          text: root.audioMuted ? "muted" : Math.round(root.audioVolume * 100) + "%"
         }
       }
     }
