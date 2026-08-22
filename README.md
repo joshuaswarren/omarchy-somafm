@@ -24,8 +24,8 @@ rm -rf ~/.local/state/somafm
 - Click the **󰐋 Soma** bar button (or summon via command palette) to open the miniwindow
 - Type in the filter box to narrow stations by name or genre
 - Click a station to play; click again to restart it
-- Header buttons: pause/resume, hide window (audio continues), close
-- Drag the header to reposition; volume slider at the bottom
+- Header buttons: mute, pause/resume, stop, hide window (audio continues), close
+- Drag the header to reposition. Volume is your system volume — the stream is a normal PipeWire stream your volume keys and audio widget already control
 
 ## License
 

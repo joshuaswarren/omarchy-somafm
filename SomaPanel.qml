@@ -31,7 +31,6 @@ Item {
   property string statusText: ""
   property var stations: []
   property string filterText: ""
-  property real audioVolume: 0.5
   property bool audioMuted: false
   property string currentTitle: ""
   property string currentGenre: ""
@@ -63,9 +62,10 @@ Item {
     id: player
     audioOutput: AudioOutput {
       id: audio
-      // Persisted, and deliberately modest on first run: a radio that opens
-      // at 90% into someone's earbuds is a bug, not a default.
-      volume: root.audioVolume
+      // Unity gain, no plugin volume control: PipeWire already owns per-stream
+      // volume and WirePlumber persists it per application (module-stream-
+      // restore). A second gain stage here just multiplies into whatever the
+      // user already set.
       muted: root.audioMuted
     }
     onMediaStatusChanged: function(status) {
@@ -242,40 +242,23 @@ Item {
     if (h > 0) root.marginBottom = Math.max(0, Math.min(root.marginBottom, h - window.height))
   }
 
-  // One state file holds window position plus volume/mute. Volume is stored
-  // as an integer percent so the writer stays a plain printf of numbers.
-  function saveSettings() {
-    stateSave.right = "" + Math.round(root.marginRight)
-    stateSave.bottom = "" + Math.round(root.marginBottom)
-    stateSave.volume = "" + Math.round(root.audioVolume * 100)
-    stateSave.muted = root.audioMuted ? "1" : "0"
-    stateSave.running = true
+  // The state file holds window position only: volume is not ours to own.
+  // PipeWire/WirePlumber manage and persist per-stream volume.
+  function savePosition() {
+    posSave.right = "" + Math.round(root.marginRight)
+    posSave.bottom = "" + Math.round(root.marginBottom)
+    posSave.running = true
   }
-
-  function savePosition() { saveSettings() }
-
-  // Dragging a slider fires continuously; coalesce the writes.
-  Timer {
-    id: saveDebounce
-    interval: 400
-    repeat: false
-    onTriggered: root.saveSettings()
-  }
-
-  function saveSettingsSoon() { saveDebounce.restart() }
 
   Process {
-    id: stateSave
+    id: posSave
     property string right: "14"
     property string bottom: "14"
-    property string volume: "50"
-    property string muted: "0"
     running: false
     command: ["sh", "-c",
       "mkdir -p '" + root.stateDir
-      + "' && printf '{\"right\":%s,\"bottom\":%s,\"volume\":%s,\"muted\":%s}' "
-      + stateSave.right + " " + stateSave.bottom + " "
-      + stateSave.volume + " " + stateSave.muted
+      + "' && printf '{\"right\":%s,\"bottom\":%s}' "
+      + posSave.right + " " + posSave.bottom
       + " > '" + root.stateDir + "/window.json'"]
   }
 
@@ -289,10 +272,7 @@ Item {
         var doc = JSON.parse(text())
         if (doc.right !== undefined) root.marginRight = Math.max(0, doc.right | 0)
         if (doc.bottom !== undefined) root.marginBottom = Math.max(0, doc.bottom | 0)
-        if (doc.volume !== undefined)
-          root.audioVolume = Math.max(0, Math.min(1, (doc.volume | 0) / 100))
-        if (doc.muted !== undefined) root.audioMuted = (doc.muted | 0) === 1
-      } catch (e) { /* first run: keep the modest defaults */ }
+      } catch (e) { /* first run */ }
     }
   }
 
@@ -305,7 +285,7 @@ Item {
     anchors { top: false; left: false; right: true; bottom: true }
     margins { right: root.marginRight; bottom: root.marginBottom }
     implicitWidth: 344
-    implicitHeight: 486
+    implicitHeight: 438
     color: root.background
     WlrLayershell.namespace: "somafm"
     WlrLayershell.layer: WlrLayer.Top
@@ -395,6 +375,22 @@ Item {
             }
           }
 
+          // mute — volume itself belongs to the system (PipeWire), this is
+          // just stream silence from the panel
+          Text {
+            color: root.audioMuted ? root.urgent : root.foreground
+            opacity: player.source && String(player.source) !== "" ? 1 : 0.25
+            text: root.audioMuted ? "󰖁" : "󰕾"
+            font.pixelSize: 15
+            font.family: Style.fontFamily
+            Behavior on opacity { NumberAnimation { duration: 120 } }
+            MouseArea {
+              anchors.fill: parent
+              anchors.margins: -4
+              cursorShape: Qt.PointingHandCursor
+              onClicked: root.audioMuted = !root.audioMuted
+            }
+          }
           Text {
             color: root.foreground
             opacity: player.source && String(player.source) !== "" ? 1 : 0.25
@@ -569,7 +565,7 @@ Item {
       // ---- station list / states ----
       Item {
         width: parent.width
-        height: parent.height - 40 - 1 - (root.playState === "idle" ? 0 : 52) - 40 - 48
+        height: parent.height - 40 - 1 - (root.playState === "idle" ? 0 : 52) - 40 - 14
 
         // loading
         Text {
@@ -720,75 +716,6 @@ Item {
               onClicked: root.playStation(modelData)
             }
           }
-        }
-      }
-
-      // ---- volume ----
-      Item {
-        width: parent.width
-        height: 48
-
-        Text {
-          id: volGlyph
-          anchors.left: parent.left
-          anchors.leftMargin: 14
-          anchors.verticalCenter: parent.verticalCenter
-          color: root.audioMuted ? root.urgent : root.muted
-          opacity: 0.8
-          text: root.audioMuted ? "󰖁" : (root.audioVolume > 0.5 ? "󰕾" : "󰖀")
-          font.pixelSize: 14
-          font.family: Style.fontFamily
-          MouseArea {
-            anchors.fill: parent
-            anchors.margins: -6
-            cursorShape: Qt.PointingHandCursor
-            onClicked: { root.audioMuted = !root.audioMuted; root.saveSettingsSoon() }
-          }
-        }
-
-        Rectangle {
-          id: volBar
-          anchors.left: volGlyph.right
-          anchors.leftMargin: 12
-          anchors.right: volPct.left
-          anchors.rightMargin: 10
-          anchors.verticalCenter: parent.verticalCenter
-          height: 4
-          radius: 2
-          color: root.muted
-          opacity: 0.25
-
-          Rectangle {
-            width: parent.width * root.audioVolume
-            height: parent.height
-            radius: 2
-            color: root.audioMuted ? root.muted : root.accent
-          }
-
-          MouseArea {
-            anchors.fill: parent
-            anchors.margins: -8
-            cursorShape: Qt.PointingHandCursor
-            function setVol(x) {
-              root.audioMuted = false
-              root.audioVolume = Math.max(0, Math.min(1, x / width))
-            }
-            onPressed: function(mouse) { setVol(mouse.x) }
-            onPositionChanged: function(mouse) { if (pressed) setVol(mouse.x) }
-            onReleased: root.saveSettingsSoon()
-          }
-        }
-
-        Text {
-          id: volPct
-          anchors.right: parent.right
-          anchors.rightMargin: 14
-          anchors.verticalCenter: parent.verticalCenter
-          color: root.muted
-          opacity: 0.6
-          font.pixelSize: 10
-          font.family: Style.fontFamily
-          text: root.audioMuted ? "muted" : Math.round(root.audioVolume * 100) + "%"
         }
       }
     }
