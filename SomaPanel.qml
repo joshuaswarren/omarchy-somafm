@@ -575,8 +575,14 @@ Item {
             Keys.onEscapePressed: { if (text !== "") text = ""; else root.close() }
             Keys.onUpPressed: function(event) { event.accepted = true; root.moveSel(-1) }
             Keys.onDownPressed: function(event) { event.accepted = true; root.moveSel(1) }
-            Keys.onPageUpPressed: function(event) { event.accepted = true; root.moveSel(-8) }
-            Keys.onPageDownPressed: function(event) { event.accepted = true; root.moveSel(8) }
+            // PageUp/PageDown/Home/End have no attached-signal form; catch
+            // them in onPressed.
+            Keys.onPressed: function(event) {
+              if (event.key === Qt.Key_PageUp) { event.accepted = true; root.moveSel(-8) }
+              else if (event.key === Qt.Key_PageDown) { event.accepted = true; root.moveSel(8) }
+              else if (event.key === Qt.Key_Home && list.count > 0) { event.accepted = true; list.currentIndex = 0; list.positionViewAtIndex(0, ListView.Contain) }
+              else if (event.key === Qt.Key_End && list.count > 0) { event.accepted = true; list.currentIndex = list.count - 1; list.positionViewAtIndex(list.count - 1, ListView.Contain) }
+            }
             Keys.onReturnPressed: function(event) { event.accepted = true; root.playSel() }
             Keys.onEnterPressed: function(event) { event.accepted = true; root.playSel() }
 
@@ -679,10 +685,13 @@ Item {
 
           Keys.onUpPressed: function(event) { event.accepted = true; root.moveSel(-1) }
           Keys.onDownPressed: function(event) { event.accepted = true; root.moveSel(1) }
-          Keys.onPageUpPressed: function(event) { event.accepted = true; root.moveSel(-8) }
-          Keys.onPageDownPressed: function(event) { event.accepted = true; root.moveSel(8) }
-          Keys.onHomePressed: function(event) { event.accepted = true; if (list.count > 0) { list.currentIndex = 0; list.positionViewAtIndex(0, ListView.Beginning) } }
-          Keys.onEndPressed: function(event) { event.accepted = true; if (list.count > 0) { list.currentIndex = list.count - 1; list.positionViewAtIndex(list.count - 1, ListView.End) } }
+          // PageUp/PageDown/Home/End have no attached-signal form.
+          Keys.onPressed: function(event) {
+            if (event.key === Qt.Key_PageUp) { event.accepted = true; root.moveSel(-8) }
+            else if (event.key === Qt.Key_PageDown) { event.accepted = true; root.moveSel(8) }
+            else if (event.key === Qt.Key_Home && list.count > 0) { event.accepted = true; list.currentIndex = 0; list.positionViewAtIndex(0, ListView.Beginning) }
+            else if (event.key === Qt.Key_End && list.count > 0) { event.accepted = true; list.currentIndex = list.count - 1; list.positionViewAtIndex(list.count - 1, ListView.End) }
+          }
           Keys.onReturnPressed: function(event) { event.accepted = true; root.playSel() }
           Keys.onEnterPressed: function(event) { event.accepted = true; root.playSel() }
           Keys.onSpacePressed: function(event) { event.accepted = true; root.togglePause() }
@@ -694,6 +703,7 @@ Item {
             readonly property bool selected: ListView.isCurrentItem
             readonly property bool current: modelData.title === root.currentTitle
 
+            height: 42
             Rectangle {
               anchors.fill: parent
               anchors.leftMargin: 8
