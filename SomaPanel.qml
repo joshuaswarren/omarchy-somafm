@@ -112,6 +112,26 @@ Item {
     if (player.playbackState === MediaPlayer.PlayingState) player.pause()
     else player.play()
   }
+  // ---- keyboard navigation ----
+  // The panel is fully drivable without a mouse: Up/Down (or PgUp/PgDn)
+  // move a selection, Enter plays it, Space toggles pause, M mutes,
+  // Escape closes. Typing in the filter keeps arrow/Enter over the
+  // filtered results, launcher-style.
+  function moveSel(delta) {
+    var n = list.count
+    if (n === 0) return
+    var i = list.currentIndex
+    if (i < 0) i = delta > 0 ? 0 : n - 1
+    else i = ((i + delta) % n + n) % n
+    list.currentIndex = i
+    list.positionViewAtIndex(i, ListView.Contain)
+  }
+
+  function playSel() {
+    var arr = root.visibleStations()
+    if (list.currentIndex >= 0 && list.currentIndex < arr.length)
+      root.playStation(arr[list.currentIndex])
+  }
 
   // ---- station list ----
   function loadStations() {
@@ -283,6 +303,7 @@ Item {
     id: window
     visible: root.opened && !root.sessionLocked
     anchors { top: false; left: false; right: true; bottom: true }
+    onVisibleChanged: if (visible) list.forceActiveFocus()
     margins { right: root.marginRight; bottom: root.marginBottom }
     implicitWidth: 344
     implicitHeight: 438
@@ -545,8 +566,19 @@ Item {
             font.family: Style.fontFamily
             clip: true
             verticalAlignment: TextInput.AlignVCenter
-            onTextChanged: root.filterText = text
+            onTextChanged: {
+              root.filterText = text
+              // Launcher behaviour: a fresh keystroke selects the first match.
+              list.currentIndex = text === "" ? -1 : (list.count > 0 ? 0 : -1)
+              if (list.currentIndex >= 0) list.positionViewAtIndex(0, ListView.Contain)
+            }
             Keys.onEscapePressed: { if (text !== "") text = ""; else root.close() }
+            Keys.onUpPressed: function(event) { event.accepted = true; root.moveSel(-1) }
+            Keys.onDownPressed: function(event) { event.accepted = true; root.moveSel(1) }
+            Keys.onPageUpPressed: function(event) { event.accepted = true; root.moveSel(-8) }
+            Keys.onPageDownPressed: function(event) { event.accepted = true; root.moveSel(8) }
+            Keys.onReturnPressed: function(event) { event.accepted = true; root.playSel() }
+            Keys.onEnterPressed: function(event) { event.accepted = true; root.playSel() }
 
             Text {
               visible: filterInput.text === "" && !filterInput.activeFocus
@@ -642,13 +674,24 @@ Item {
           model: root.visibleStations()
           currentIndex: -1
           boundsBehavior: Flickable.StopAtBounds
+          keyNavigationEnabled: false // moveSel handles it; the filter shares these keys
+          focus: true
+
+          Keys.onUpPressed: function(event) { event.accepted = true; root.moveSel(-1) }
+          Keys.onDownPressed: function(event) { event.accepted = true; root.moveSel(1) }
+          Keys.onPageUpPressed: function(event) { event.accepted = true; root.moveSel(-8) }
+          Keys.onPageDownPressed: function(event) { event.accepted = true; root.moveSel(8) }
+          Keys.onHomePressed: function(event) { event.accepted = true; if (list.count > 0) { list.currentIndex = 0; list.positionViewAtIndex(0, ListView.Beginning) } }
+          Keys.onEndPressed: function(event) { event.accepted = true; if (list.count > 0) { list.currentIndex = list.count - 1; list.positionViewAtIndex(list.count - 1, ListView.End) } }
+          Keys.onReturnPressed: function(event) { event.accepted = true; root.playSel() }
+          Keys.onEnterPressed: function(event) { event.accepted = true; root.playSel() }
+          Keys.onSpacePressed: function(event) { event.accepted = true; root.togglePause() }
 
           delegate: Item {
             id: stationRow
             required property var modelData
-            width: ListView.view.width
-            height: 42
-
+            required property int index
+            readonly property bool selected: ListView.isCurrentItem
             readonly property bool current: modelData.title === root.currentTitle
 
             Rectangle {
@@ -659,8 +702,11 @@ Item {
               anchors.bottomMargin: 1
               radius: Style.cornerRadius
               color: rowMouse.containsPress ? root.tint(0.30)
-                : (stationRow.current ? root.tint(0.16)
-                  : (rowMouse.containsMouse ? root.tint(0.07) : "transparent"))
+                : (stationRow.selected ? root.tint(0.12)
+                  : (stationRow.current ? root.tint(0.16)
+                    : (rowMouse.containsMouse ? root.tint(0.07) : "transparent")))
+              border.color: stationRow.selected && !stationRow.current ? root.tint(0.55) : "transparent"
+              border.width: 1
 
               Behavior on color { ColorAnimation { duration: 110 } }
 
