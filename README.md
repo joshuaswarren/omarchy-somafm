@@ -1,5 +1,7 @@
 # Soma.fm for Omarchy
 
+[![Sponsor](https://img.shields.io/badge/Sponsor-%E2%9D%A4-pink)](https://github.com/sponsors/joshuaswarren)
+
 Listener-supported, commercial-free internet radio from [Soma.fm](https://somafm.com) in a small Omarchy shell window. All 46 stations, filter by name or genre, fully keyboard-drivable. Audio keeps streaming when the window is hidden.
 
 ![Soma.fm panel](preview.png)
@@ -45,6 +47,14 @@ Typing filters the list while arrows and `Enter` stay on the results, so `deep` 
 - Click a station to play; click again to restart it
 - Header buttons: mute, pause/resume, stop, hide window (audio continues), close
 - Drag the header to reposition. Volume is your system volume — the stream is a normal PipeWire stream your volume keys and audio widget already control
+
+## Support
+
+Every bit of support helps keep omarchy-somafm alive and free. If you are able, [sponsor on GitHub](https://github.com/sponsors/joshuaswarren) or send a Lightning donation to `joshuaswarren@strike.me` to directly fund continued development and new integrations.
+
+[![Sponsor](https://img.shields.io/badge/Sponsor-%E2%9D%A4-pink?style=for-the-badge)](https://github.com/sponsors/joshuaswarren)
+
+If financial support is not an option, you can still make a big difference: [star the repo](https://github.com/joshuaswarren/omarchy-somafm), share it, or recommend it to a colleague. Word of mouth is how most people find omarchy-somafm.
 
 ## License
 
