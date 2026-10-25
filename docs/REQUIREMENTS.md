@@ -26,7 +26,7 @@ Listening to internet radio while working means either a browser tab (heavy, get
 
 ## 4. Security notes
 
-- All fetches run `curl --fail --proto =https` — error pages can't be parsed as data, and redirects cannot downgrade to plaintext.
+- Catalog and playlist fetches use `curl --fail`; the redirect probe does not. All transfers enforce HTTPS and size limits.
 - Every transfer is bounded by `curl --max-filesize` (2 MiB catalog, 128 KiB playlist, 16 KiB redirect probe) and parsing re-bounds item count (256) and field lengths — a hostile endpoint cannot inflate the keep-loaded shell through either buffering or structure.
 - The stream's redirect chain is resolved by the plugin before playback: the final `url_effective` must still pass the somafm.com gate, or playback is refused. The allowlist is never checked only on the initial URL.
 - Both the playlist URL from channels.json and the `File1=` value inside a `.pls` are remote-controlled; both are gated through `isSomaUrl()` (https + somafm.com host) before reaching curl or the player. The gate lives in Model.js and is unit-tested.
@@ -34,4 +34,4 @@ Listening to internet radio while working means either a browser tab (heavy, get
 
 ## 5. Testing
 
-`node --test tests/model.test.mjs` — 8 tests over parseChannels (playability filter, mp3 preference, sorting), extractStreamUrl (CRLF tolerance, junk rejection), isSomaUrl (host/scheme gating incl. `file://` and lookalike domains), and filterStations.
+Run `node --test tests/model.test.mjs`. It covers channel parsing, playable-stream selection, sorting, playlist parsing, URL scheme/host checks and station filtering.
