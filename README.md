@@ -44,8 +44,8 @@ To open a station directly, pass its catalog ID:
 omarchy-shell shell summon io.github.joshuaswarren.somafm '{"station":"groovesalad"}'
 ```
 
-The station is selected after the catalog loads. The catalog changes over
-time; this plugin does not promise a fixed station count.
+The station starts playing after the catalog loads. The catalog changes
+over time; this plugin does not promise a fixed station count.
 
 ## Update and remove
 
