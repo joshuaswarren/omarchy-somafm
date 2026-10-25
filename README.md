@@ -2,60 +2,83 @@
 
 [![Sponsor](https://img.shields.io/badge/Sponsor-%E2%9D%A4-pink)](https://github.com/sponsors/joshuaswarren)
 
-Listener-supported, commercial-free internet radio from [Soma.fm](https://somafm.com) in a small Omarchy shell window. All 46 stations, filter by name or genre, fully keyboard-drivable. Audio keeps streaming when the window is hidden.
+Listen to [Soma.fm](https://somafm.com) in a small Omarchy shell window.
+Browse its live station list, filter by name or genre, and control playback
+with the keyboard. Audio continues when the panel is hidden.
 
 ![Soma.fm panel](preview.png)
 
-![demo](assets/demo.gif)
+![Panel demo](assets/demo.gif)
 
 ## Install
 
-From Omarchy Plugin Control (Super+Shift+P → Plugins), search for **Soma.fm** and install — or run the install command shown on the plugin's marketplace page.
-
-## Remove
-
-Uninstall from Omarchy Plugin Control, then delete the state directory if you want a fully clean slate:
-
-```
-rm -rf ~/.local/state/somafm
+```sh
+omarchy plugin add https://github.com/joshuaswarren/omarchy-somafm --enable
 ```
 
-## External dependencies
+The plugin needs Omarchy's shell, QtMultimedia for audio, and `curl` for the
+station list and playlists. It does not need a separate player.
 
-- `curl` (included with Omarchy) — fetches the station list from somafm.com
-- Audio playback uses QtMultimedia inside the shell; no extra packages needed
+## Use
 
-## Keyboard
-
-The panel takes focus when it opens, so it is drivable without touching the mouse:
+Click the Soma bar button or use the command palette to open the panel.
+Type in the filter box to narrow stations. Click a station to play it;
+clicking it again restarts it.
 
 | Key | Action |
-| --- | --- |
-| `Up` / `Down` | Move the selection |
-| `PgUp` / `PgDn` | Move by eight |
+|---|---|
+| `Up` / `Down` | Move selection |
+| `PgUp` / `PgDn` | Move eight stations |
 | `Home` / `End` | First / last station |
-| `Enter` | Play the selected station |
-| `Space` | Pause / resume |
-| `Esc` | Clear the filter, or hide the panel |
+| `Enter` | Play selection |
+| `Space` | Pause / resume while the station list has focus |
+| `Esc` | In the filter input, clear the filter; if already empty, hide the panel |
 
-Typing filters the list while arrows and `Enter` stay on the results, so `deep` + `Enter` plays Deep Space One.
+The header has stop, mute, pause/resume and hide buttons. Hiding leaves
+audio playing. Drag the header to move the panel. System volume keys and
+the audio widget control the stream's volume.
 
-## Usage
+To open a station directly, pass its catalog ID:
 
-- Click the **󰐋 Soma** bar button (or summon via command palette) to open the miniwindow
-- Type in the filter box to narrow stations by name or genre
-- Click a station to play; click again to restart it
-- Header buttons: mute, pause/resume, stop, hide window (audio continues), close
-- Drag the header to reposition. Volume is your system volume — the stream is a normal PipeWire stream your volume keys and audio widget already control
+```sh
+omarchy-shell shell summon io.github.joshuaswarren.somafm '{"station":"groovesalad"}'
+```
+
+The station starts playing after the catalog loads. The catalog changes
+over time; this plugin does not promise a fixed station count.
+
+## Update and remove
+
+```sh
+omarchy plugin update io.github.joshuaswarren.somafm
+omarchy plugin remove io.github.joshuaswarren.somafm
+```
+
+To enable an already installed copy:
+
+```sh
+omarchy plugin enable io.github.joshuaswarren.somafm
+```
+
+## State and network access
+
+The plugin saves window position in
+`${XDG_STATE_HOME:-~/.local/state}/somafm/window.json`. There is no saved
+queue, favourites list or listening-history file. Audio can continue while
+the session is locked; the panel hides on lock.
+
+Catalog and playlist requests use HTTPS-only Soma.fm URLs, with redirect
+checks, timeouts and transfer-size limits. Playback needs a network
+connection. See [requirements](docs/REQUIREMENTS.md) for implementation limits.
 
 ## Support
 
-Every bit of support helps keep omarchy-somafm alive and free. If you are able, [sponsor on GitHub](https://github.com/sponsors/joshuaswarren) or send a Lightning donation to `joshuaswarren@strike.me` to directly fund continued development and new integrations.
+[Sponsor this plugin](https://github.com/sponsors/joshuaswarren) or use
+Lightning at `joshuaswarren@strike.me`.
 
-[![Sponsor](https://img.shields.io/badge/Sponsor-%E2%9D%A4-pink?style=for-the-badge)](https://github.com/sponsors/joshuaswarren)
-
-If financial support is not an option, you can still make a big difference: [star the repo](https://github.com/joshuaswarren/omarchy-somafm), share it, or recommend it to a colleague. Word of mouth is how most people find omarchy-somafm.
+Soma.fm is listener-supported. Consider [supporting the station](https://somafm.com/support/)
+if you listen regularly.
 
 ## License
 
-MIT — see [LICENSE](LICENSE). Soma.fm is a listener-supported service; consider [donating](https://somafm.com/support/) if you listen daily.
+MIT. See [LICENSE](LICENSE).
