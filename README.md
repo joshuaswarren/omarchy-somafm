@@ -69,7 +69,8 @@ the session is locked; the panel hides on lock.
 
 Catalog and playlist requests use HTTPS-only Soma.fm URLs, with redirect
 checks, timeouts and transfer-size limits. Playback needs a network
-connection. See [requirements](docs/REQUIREMENTS.md) for implementation limits.
+connection. Playback requests are bounded by HTTPS-only URLs, redirect checks,
+timeouts and transfer-size limits.
 
 ## Support
 
